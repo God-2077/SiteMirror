@@ -1,0 +1,26 @@
+{
+  "name": "hono-proxy-optimized",
+  "version": "2.0.0",
+  "description": "高性能HTTP代理服务器",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "docker:build": "docker build -t hono-proxy .",
+    "docker:run": "docker run -p 3000:3000 --env-file .env hono-proxy"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.0.0",
+    "dotenv": "^17.2.3",
+    "hono": "^4.0.0",
+    "lru-cache": "^10.0.0",
+    "undici": "^6.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

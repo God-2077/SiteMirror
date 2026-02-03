@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  hono-proxy:
+    image: site-mirror
+    build: .
+    ports:
+      - "5089:3000"
+    container_name: site-mirror
+    env_file:
+      - .env
+    restart: unless-stopped # 容器意外退出时自动重启
