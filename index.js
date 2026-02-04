@@ -4,7 +4,6 @@ import { serve } from '@hono/node-server';
 import { logger } from './log.js';
 import { HTTPException } from 'hono/http-exception';
 import { compress } from 'hono/compress';
-import { timing } from 'hono/timing';
 import { timeout } from 'hono/timeout'
 import { bodyLimit } from 'hono/body-limit'
 import { prettyJSON } from 'hono/pretty-json'
