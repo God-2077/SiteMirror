@@ -1,16 +1,19 @@
 // index.js
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
-import { logger } from './log.js';
+import { logger } from './middleware/log.js';
 import { HTTPException } from 'hono/http-exception';
 import { compress } from 'hono/compress';
 import { timeout } from 'hono/timeout'
 import { bodyLimit } from 'hono/body-limit'
 import { prettyJSON } from 'hono/pretty-json'
+import { showRoutes } from 'hono/dev'
 
 import { Pool } from 'undici';
 import { LRUCache } from 'lru-cache';
 import dotenv from 'dotenv'
+
+import { tokenAuth } from './middleware/token-auth'
 
 dotenv.config()
 
@@ -26,9 +29,18 @@ const REQUEST_TIMEOUT = parseInt(process.env.REQUEST_TIMEOUT || '10000', 10);
 const MAX_CONNECTIONS = parseInt(process.env.MAX_CONNECTIONS || '100', 10);
 const MAX_KEEP_ALIVE_TIMEOUT = parseInt(process.env.MAX_KEEP_ALIVE_TIMEOUT || '60000', 10);
 
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN || ""
+
 // Cache strategy configuration
 const CACHE_STRATEGY = process.env.CACHE_STRATEGY || 'auto'; // 'off', 'force', 'auto'
 const CACHE_STATIC_ONLY = process.env.CACHE_STATIC_ONLY === 'true'; // Only cache static resources
+
+
+const INJECTED_HEAD_BEGIN = process.env.INJECTED_HEAD_BEGIN || '';
+const INJECTED_HEAD_END = process.env.INJECTED_HEAD_END || '';
+const INJECTED_BODY_BEGIN = process.env.INJECTED_BODY_BEGIN || '';
+const INJECTED_BODY_END = process.env.INJECTED_BODY_END || '';
+
 
 // Create connection pool
 const originPool = new Pool(`${PROTOCOL}://${ORIGIN_SERVER}`, {
@@ -51,6 +63,13 @@ const STATIC_EXTENSIONS = [
   'pdf', 'xml', 'json', 'txt', 'csv', 'zip', 'gz', 'tar', 'rar', '7z'
 ];
 
+const staticMimeTypes = [
+  'image/', 'font/', 'application/font-', 'application/x-font-',
+  'text/css', 'application/javascript', 'text/javascript',
+  'video/', 'audio/', 'application/pdf', 'application/zip',
+  'application/x-tar', 'application/x-rar-compressed', 'application/x-7z-compressed',
+];
+
 // Check if it's a static resource
 const isStaticResource = (path, contentType) => {
   if (path) {
@@ -61,12 +80,7 @@ const isStaticResource = (path, contentType) => {
   }
 
   if (contentType) {
-    const staticMimeTypes = [
-      'image/', 'font/', 'application/font-', 'application/x-font-',
-      'text/css', 'application/javascript', 'text/javascript',
-      'video/', 'audio/', 'application/pdf', 'application/zip',
-      'application/x-tar', 'application/x-rar-compressed', 'application/x-7z-compressed',
-    ];
+    
 
     for (const mimeType of staticMimeTypes) {
       if (contentType.includes(mimeType)) {
@@ -150,10 +164,6 @@ const encodePath = (path) => {
 
 // html-inject-middleware.js
 const htmlInjectMiddleware = () => {
-  const INJECTED_HEAD_BEGIN = process.env.INJECTED_HEAD_BEGIN || '';
-  const INJECTED_HEAD_END = process.env.INJECTED_HEAD_END || '';
-  const INJECTED_BODY_BEGIN = process.env.INJECTED_BODY_BEGIN || '';
-  const INJECTED_BODY_END = process.env.INJECTED_BODY_END || '';
 
   return async (c, next) => {
     await next();
@@ -227,7 +237,6 @@ const htmlInjectMiddleware = () => {
         headers: newHeaders,
       });
 
-      console.log(`✅ HTML injected at [${injectionLog.join(', ')}]: ${c.req.url}`);
 
     } catch (error) {
       console.error('HTML injection error:', error);
@@ -239,6 +248,11 @@ const htmlInjectMiddleware = () => {
 // Middleware
 app.use(safeTiming);
 app.use(compress());
+app.use(tokenAuth({
+  cookieName: '_access_token', // 可选，默认'access_token'
+  token: ACCESS_TOKEN, // 必填，预期的令牌值
+  setupPageTitle: '访问令牌' // 可选，页面标题
+}))
 app.use(prettyJSON({force:true}))
 app.use(htmlInjectMiddleware());
 app.use(logger());
@@ -426,21 +440,41 @@ const staticCacheMiddleware = async (c, next) => {
 // Request header processing function
 const processHeaders = (originalHeaders) => {
   const headers = {};
+  const disableCookie = typeof DISABLE_COOKIE !== 'undefined' ? DISABLE_COOKIE : false;
 
   for (const [key, value] of originalHeaders.entries()) {
     const lowerKey = key.toLowerCase();
 
     if (lowerKey === 'host') {
       headers['host'] = ORIGIN_SERVER;
-      // } else if (lowerKey === 'accept-encoding') {
-      // headers['accept-encoding'] = value;
-      // 通过 accept-encoding 会乱码，原因未知
     } else if (!['accept-encoding', 'connection', 'keep-alive', 'content-length'].includes(lowerKey)) {
-      headers[key] = value;
+      // 处理cookie
+      if (lowerKey === 'cookie') {
+        if (!disableCookie) {
+          // 移除_access_token
+          const cookieString = value;
+          const filteredCookies = cookieString
+            .split(';')
+            .map(cookie => cookie.trim())
+            .filter(cookie => {
+              const [cookieName] = cookie.split('=');
+              return cookieName.trim() !== '_access_token';
+            })
+            .join('; ');
+          
+          if (filteredCookies) {
+            headers[key] = filteredCookies;
+          }
+        }
+        // 如果disableCookie为true，则跳过不设置cookie
+      } else {
+        headers[key] = value;
+      }
     }
   }
   return new Headers(headers);
 };
+
 
 // Process response headers
 const processResponseHeaders = (originalHeaders) => {
@@ -672,6 +706,11 @@ app.onError((err, c) => {
     error: 'Internal Server Error'
   }, 500);
 });
+
+
+showRoutes(app, {
+  verbose: true,
+})
 
 // Graceful shutdown handling
 const cleanup = async () => {
