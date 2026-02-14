@@ -21,4 +21,4 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 # 在容器启动时运行应用
-CMD [ "node", "index.js" ]
+CMD [ "tsx", "index.js" ]

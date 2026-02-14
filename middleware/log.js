@@ -1,3 +1,7 @@
+// 参考 hono https://github.com/honojs
+// node_modules\hono\dist\utils\color.js
+// node_modules\hono\dist\middleware\logger\index.js
+
 import { getConnInfo } from '@hono/node-server/conninfo'
 
 function getColorEnabled() {
